@@ -49,9 +49,9 @@ void syscall_entry(THREADID tid, CONTEXT* ctxt, SYSCALL_STANDARD std, VOID* v) {
   }
 }
 
-VOID before_inst_with_read_reg(ADDRINT reg_id, CONTEXT* ctxt) {
+VOID before_inst_with_read_reg(ADDRINT inst_addr, ADDRINT reg_id, CONTEXT* ctxt) {
   REG reg = (REG)reg_id;
-  cout << "\tread reg: " << REG_StringShort(reg) << endl;
+  cout << "0x" << hex << inst_addr << endl << "\tread reg: " << REG_StringShort(reg) << endl;
   cout << "\t\t";
   UINT8 val_buf[512];
   UINT32 reg_size = REG_Size(reg);
@@ -63,9 +63,9 @@ VOID before_inst_with_read_reg(ADDRINT reg_id, CONTEXT* ctxt) {
   cout << endl;
 }
 
-VOID before_inst_with_written_reg(ADDRINT reg_id, CONTEXT* ctxt) {
+VOID before_inst_with_written_reg(ADDRINT inst_addr, ADDRINT reg_id, CONTEXT* ctxt) {
   REG reg = (REG)reg_id;
-  cout << "\twritten reg: " << REG_StringShort(reg) << endl;
+  cout << "0x" << hex << inst_addr << endl << "\twritten reg: " << REG_StringShort(reg) << endl;
   cout << "\t\t";
   UINT8 val_buf[512];
   UINT32 reg_size = REG_Size(reg);
@@ -77,12 +77,12 @@ VOID before_inst_with_written_reg(ADDRINT reg_id, CONTEXT* ctxt) {
   cout << endl;
 }
 
-VOID before_inst_with_read_mem(ADDRINT mem_addr) {
-  cout << "\tread mem: " << hex << mem_addr << endl;
+VOID before_inst_with_read_mem(ADDRINT inst_addr, ADDRINT mem_addr) {
+  cout << "0x" << hex << inst_addr << endl << "\tread mem: " << hex << mem_addr << endl;
 }
 
-VOID before_inst_with_written_mem(ADDRINT mem_addr) {
-  cout << "\twritten mem: " << hex << mem_addr << endl;
+VOID before_inst_with_written_mem(ADDRINT inst_addr, ADDRINT mem_addr) {
+  cout << "0x" << hex << inst_addr << endl << "\twritten mem: " << hex << mem_addr << endl;
 }
 
 VOID inst_instrument(INS inst, VOID *v) {
@@ -92,23 +92,24 @@ VOID inst_instrument(INS inst, VOID *v) {
   for(uint32_t i = 0; i < regR_num ; ++i) {
     // cout << "\tread reg: " << REG_StringShort(INS_RegR(inst, i)) << endl;
     if(REG_valid(INS_RegR(inst, i))) {
-      INS_InsertCall(inst, IPOINT_BEFORE, (AFUNPTR)before_inst_with_read_reg, IARG_ADDRINT, INS_RegR(inst, i), IARG_CONTEXT, IARG_END);
+      INS_InsertCall(inst, IPOINT_BEFORE, (AFUNPTR)before_inst_with_read_reg, IARG_INST_PTR, IARG_ADDRINT, INS_RegR(inst, i), IARG_CONTEXT, IARG_END);
     }
+  }
+
+  if(INS_IsMemoryRead(inst)) {
+    INS_InsertCall(inst, IPOINT_BEFORE, (AFUNPTR)before_inst_with_read_mem, IARG_INST_PTR, IARG_MEMORYREAD_EA, IARG_END);
+  }
+  if(INS_HasMemoryRead2(inst)) {
+    INS_InsertCall(inst, IPOINT_BEFORE, (AFUNPTR)before_inst_with_read_mem, IARG_INST_PTR, IARG_MEMORYREAD2_EA, IARG_END);
   }
 
   uint32_t regW_num = INS_MaxNumWRegs(inst);
   for(uint32_t i = 0; i < regW_num ; ++i) {
-    INS_InsertCall(inst, IPOINT_BEFORE, (AFUNPTR)before_inst_with_written_reg, IARG_ADDRINT, INS_RegW(inst, i), IARG_CONTEXT, IARG_END);
+    INS_InsertCall(inst, IPOINT_BEFORE, (AFUNPTR)before_inst_with_written_reg, IARG_INST_PTR, IARG_ADDRINT, INS_RegW(inst, i), IARG_CONTEXT, IARG_END);
   }
   
-  if(INS_IsMemoryRead(inst)) {
-    INS_InsertCall(inst, IPOINT_BEFORE, (AFUNPTR)before_inst_with_read_mem, IARG_MEMORYREAD_EA, IARG_END);
-  }
-  if(INS_HasMemoryRead2(inst)) {
-    INS_InsertCall(inst, IPOINT_BEFORE, (AFUNPTR)before_inst_with_read_mem, IARG_MEMORYREAD2_EA, IARG_END);
-  }
   if(INS_IsMemoryWrite(inst)) {
-    INS_InsertCall(inst, IPOINT_BEFORE, (AFUNPTR)before_inst_with_written_mem, IARG_MEMORYWRITE_EA, IARG_END);
+    INS_InsertCall(inst, IPOINT_BEFORE, (AFUNPTR)before_inst_with_written_mem, IARG_INST_PTR, IARG_MEMORYWRITE_EA, IARG_END);
   }
 }
 
