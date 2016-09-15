@@ -77,7 +77,7 @@ void syscall_entry(THREADID tid, CONTEXT* ctxt, SYSCALL_STANDARD std, VOID* v) {
   }
 }
 
-VOID before_inst(ADDRINT inst_addr, ADDRINT read_reg_id_1, ADDRINT read_reg_id_2, ADDRINT read_reg_id_3, ADDRINT read_reg_id_4, ADDRINT read_reg_id_5, ADDRINT read_reg_id_6, ADDRINT written_reg_id_1, ADDRINT written_reg_id_2, ADDRINT written_reg_id_3, ADDRINT written_reg_id_4, ADDRINT written_reg_id_5, ADDRINT written_reg_id_6, ADDRINT read_mem_addr_1, ADDRINT read_mem_addr_2, ADDRINT written_mem_addr, CONTEXT* ctxt) {
+VOID before_inst(ADDRINT inst_addr, ADDRINT read_reg_id_1, ADDRINT read_reg_id_2, ADDRINT read_reg_id_3, ADDRINT read_reg_id_4, ADDRINT read_reg_id_5, ADDRINT read_reg_id_6, ADDRINT written_reg_id_1, ADDRINT written_reg_id_2, ADDRINT written_reg_id_3, ADDRINT written_reg_id_4, ADDRINT written_reg_id_5, ADDRINT written_reg_id_6, BOOL have_read_mem_1, ADDRINT read_mem_addr_1, BOOL have_read_mem_2, ADDRINT read_mem_addr_2, BOOL have_written_mem, ADDRINT written_mem_addr, CONTEXT* ctxt) {
   REG read_reg[6] = {(REG)read_reg_id_1, (REG)read_reg_id_2, (REG)read_reg_id_3, (REG)read_reg_id_4, (REG)read_reg_id_5, (REG)read_reg_id_6};
   REG written_reg[6] = {(REG)written_reg_id_1, (REG)written_reg_id_2, (REG)written_reg_id_3, (REG)written_reg_id_4, (REG)written_reg_id_5, (REG)written_reg_id_6};
   
@@ -113,6 +113,16 @@ VOID before_inst(ADDRINT inst_addr, ADDRINT read_reg_id_1, ADDRINT read_reg_id_2
       cout << " " << int(val_buf[i]);
     }
     cout << endl;
+  }
+  
+  if(have_read_mem_1) {
+    cout << "\tread mem: " << hex << read_mem_addr_1 << endl;
+  }
+  if(have_read_mem_2) {
+    cout << "\tread mem: " << hex << read_mem_addr_2 << endl;
+  }
+  if(have_written_mem) {
+    cout << "\twritten mem: " << hex << written_mem_addr << endl;
   }
 }
 
@@ -158,7 +168,7 @@ VOID inst_instrument(INS inst, VOID *v) {
   ADDRINT read_reg_id[6] = {0};
   ADDRINT written_reg_id[6] = {0};
 
-  bool is_read_mem_1 = false, is_read_mem_2 = false, is_write_mem = false;
+  bool have_read_mem_1 = false, have_read_mem_2 = false, have_written_mem = false;
     
   uint32_t regR_num = INS_MaxNumRRegs(inst);
   assert(regR_num <= 6);
@@ -171,11 +181,13 @@ VOID inst_instrument(INS inst, VOID *v) {
   }
 
   if(INS_IsMemoryRead(inst)) {
-    is_read_mem_1 = true;
+    cout << "have read mem 1" << endl;
+    have_read_mem_1 = true;
     // INS_InsertCall(inst, IPOINT_BEFORE, (AFUNPTR)before_inst_with_read_mem, IARG_INST_PTR, IARG_MEMORYREAD_EA, IARG_END);
   }
   if(INS_HasMemoryRead2(inst)) {
-    is_read_mem_2 = true;
+    cout << "have read mem 2" << endl;
+    have_read_mem_2 = true;
     // INS_InsertCall(inst, IPOINT_BEFORE, (AFUNPTR)before_inst_with_read_mem, IARG_INST_PTR, IARG_MEMORYREAD2_EA, IARG_END);
   }
 
@@ -187,34 +199,35 @@ VOID inst_instrument(INS inst, VOID *v) {
   }
   
   if(INS_IsMemoryWrite(inst)) {
-    is_write_mem = true;
+    cout << "have written mem" << endl;
+    have_written_mem = true;
     // INS_InsertCall(inst, IPOINT_BEFORE, (AFUNPTR)before_inst_with_written_mem, IARG_INST_PTR, IARG_MEMORYWRITE_EA, IARG_END);
   }
   
-  if(is_read_mem_1 == true) {
-    if(is_read_mem_2 == true) {
-      if(is_write_mem == true) {
-        INS_InsertCall(inst, IPOINT_BEFORE, (AFUNPTR)before_inst, IARG_INST_PTR, IARG_ADDRINT, read_reg_id[0], IARG_ADDRINT, read_reg_id[1], IARG_ADDRINT, read_reg_id[2], IARG_ADDRINT, read_reg_id[3], IARG_ADDRINT, read_reg_id[4], IARG_ADDRINT, read_reg_id[5], IARG_ADDRINT, written_reg_id[0], IARG_ADDRINT, written_reg_id[1], IARG_ADDRINT, written_reg_id[2], IARG_ADDRINT, written_reg_id[3], IARG_ADDRINT, written_reg_id[4], IARG_ADDRINT, written_reg_id[5], IARG_MEMORYREAD_EA, IARG_MEMORYREAD2_EA, IARG_MEMORYWRITE_EA, IARG_CONTEXT, IARG_END);
+  if(have_read_mem_1 == true) {
+    if(have_read_mem_2 == true) {
+      if(have_written_mem == true) {
+        INS_InsertCall(inst, IPOINT_BEFORE, (AFUNPTR)before_inst, IARG_INST_PTR, IARG_ADDRINT, read_reg_id[0], IARG_ADDRINT, read_reg_id[1], IARG_ADDRINT, read_reg_id[2], IARG_ADDRINT, read_reg_id[3], IARG_ADDRINT, read_reg_id[4], IARG_ADDRINT, read_reg_id[5], IARG_ADDRINT, written_reg_id[0], IARG_ADDRINT, written_reg_id[1], IARG_ADDRINT, written_reg_id[2], IARG_ADDRINT, written_reg_id[3], IARG_ADDRINT, written_reg_id[4], IARG_ADDRINT, written_reg_id[5], IARG_BOOL, have_read_mem_1, IARG_MEMORYREAD_EA, IARG_BOOL, have_read_mem_2, IARG_MEMORYREAD2_EA, IARG_BOOL, have_written_mem, IARG_MEMORYWRITE_EA, IARG_CONTEXT, IARG_END);
       }
       else {
-        INS_InsertCall(inst, IPOINT_BEFORE, (AFUNPTR)before_inst, IARG_INST_PTR, IARG_ADDRINT, read_reg_id[0], IARG_ADDRINT, read_reg_id[1], IARG_ADDRINT, read_reg_id[2], IARG_ADDRINT, read_reg_id[3], IARG_ADDRINT, read_reg_id[4], IARG_ADDRINT, read_reg_id[5], IARG_ADDRINT, written_reg_id[0], IARG_ADDRINT, written_reg_id[1], IARG_ADDRINT, written_reg_id[2], IARG_ADDRINT, written_reg_id[3], IARG_ADDRINT, written_reg_id[4], IARG_ADDRINT, written_reg_id[5], IARG_MEMORYREAD_EA, IARG_MEMORYREAD2_EA, IARG_ADDRINT, 0, IARG_CONTEXT, IARG_END);
+        INS_InsertCall(inst, IPOINT_BEFORE, (AFUNPTR)before_inst, IARG_INST_PTR, IARG_ADDRINT, read_reg_id[0], IARG_ADDRINT, read_reg_id[1], IARG_ADDRINT, read_reg_id[2], IARG_ADDRINT, read_reg_id[3], IARG_ADDRINT, read_reg_id[4], IARG_ADDRINT, read_reg_id[5], IARG_ADDRINT, written_reg_id[0], IARG_ADDRINT, written_reg_id[1], IARG_ADDRINT, written_reg_id[2], IARG_ADDRINT, written_reg_id[3], IARG_ADDRINT, written_reg_id[4], IARG_ADDRINT, written_reg_id[5], IARG_BOOL, have_read_mem_1, IARG_MEMORYREAD_EA, IARG_BOOL, have_read_mem_2, IARG_MEMORYREAD2_EA, IARG_BOOL, have_written_mem, IARG_ADDRINT, 0, IARG_CONTEXT, IARG_END);
       }
     }
     else {
-      if(is_write_mem == true) {
-        INS_InsertCall(inst, IPOINT_BEFORE, (AFUNPTR)before_inst, IARG_INST_PTR, IARG_ADDRINT, read_reg_id[0], IARG_ADDRINT, read_reg_id[1], IARG_ADDRINT, read_reg_id[2], IARG_ADDRINT, read_reg_id[3], IARG_ADDRINT, read_reg_id[4], IARG_ADDRINT, read_reg_id[5], IARG_ADDRINT, written_reg_id[0], IARG_ADDRINT, written_reg_id[1], IARG_ADDRINT, written_reg_id[2], IARG_ADDRINT, written_reg_id[3], IARG_ADDRINT, written_reg_id[4], IARG_ADDRINT, written_reg_id[5], IARG_MEMORYREAD_EA, IARG_ADDRINT, 0, IARG_MEMORYWRITE_EA, IARG_CONTEXT, IARG_END);
+      if(have_written_mem == true) {
+        INS_InsertCall(inst, IPOINT_BEFORE, (AFUNPTR)before_inst, IARG_INST_PTR, IARG_ADDRINT, read_reg_id[0], IARG_ADDRINT, read_reg_id[1], IARG_ADDRINT, read_reg_id[2], IARG_ADDRINT, read_reg_id[3], IARG_ADDRINT, read_reg_id[4], IARG_ADDRINT, read_reg_id[5], IARG_ADDRINT, written_reg_id[0], IARG_ADDRINT, written_reg_id[1], IARG_ADDRINT, written_reg_id[2], IARG_ADDRINT, written_reg_id[3], IARG_ADDRINT, written_reg_id[4], IARG_ADDRINT, written_reg_id[5], IARG_BOOL, have_read_mem_1, IARG_MEMORYREAD_EA, IARG_BOOL, have_read_mem_2, IARG_ADDRINT, 0, IARG_BOOL, have_written_mem, IARG_MEMORYWRITE_EA, IARG_CONTEXT, IARG_END);
       }
       else {
-        INS_InsertCall(inst, IPOINT_BEFORE, (AFUNPTR)before_inst, IARG_INST_PTR, IARG_ADDRINT, read_reg_id[0], IARG_ADDRINT, read_reg_id[1], IARG_ADDRINT, read_reg_id[2], IARG_ADDRINT, read_reg_id[3], IARG_ADDRINT, read_reg_id[4], IARG_ADDRINT, read_reg_id[5], IARG_ADDRINT, written_reg_id[0], IARG_ADDRINT, written_reg_id[1], IARG_ADDRINT, written_reg_id[2], IARG_ADDRINT, written_reg_id[3], IARG_ADDRINT, written_reg_id[4], IARG_ADDRINT, written_reg_id[5], IARG_MEMORYREAD_EA, IARG_ADDRINT, 0, IARG_ADDRINT, 0, IARG_CONTEXT, IARG_END);
+        INS_InsertCall(inst, IPOINT_BEFORE, (AFUNPTR)before_inst, IARG_INST_PTR, IARG_ADDRINT, read_reg_id[0], IARG_ADDRINT, read_reg_id[1], IARG_ADDRINT, read_reg_id[2], IARG_ADDRINT, read_reg_id[3], IARG_ADDRINT, read_reg_id[4], IARG_ADDRINT, read_reg_id[5], IARG_ADDRINT, written_reg_id[0], IARG_ADDRINT, written_reg_id[1], IARG_ADDRINT, written_reg_id[2], IARG_ADDRINT, written_reg_id[3], IARG_ADDRINT, written_reg_id[4], IARG_ADDRINT, written_reg_id[5], IARG_BOOL, have_read_mem_1, IARG_MEMORYREAD_EA, IARG_BOOL, have_read_mem_2, IARG_ADDRINT, 0, IARG_BOOL, have_written_mem, IARG_ADDRINT, 0, IARG_CONTEXT, IARG_END);
       }
     }
   }
   else {
-    if(is_write_mem == true) {
-      INS_InsertCall(inst, IPOINT_BEFORE, (AFUNPTR)before_inst, IARG_INST_PTR, IARG_ADDRINT, read_reg_id[0], IARG_ADDRINT, read_reg_id[1], IARG_ADDRINT, read_reg_id[2], IARG_ADDRINT, read_reg_id[3], IARG_ADDRINT, read_reg_id[4], IARG_ADDRINT, read_reg_id[5], IARG_ADDRINT, written_reg_id[0], IARG_ADDRINT, written_reg_id[1], IARG_ADDRINT, written_reg_id[2], IARG_ADDRINT, written_reg_id[3], IARG_ADDRINT, written_reg_id[4], IARG_ADDRINT, written_reg_id[5], IARG_ADDRINT, 0, IARG_ADDRINT, 0, IARG_MEMORYWRITE_EA, IARG_CONTEXT, IARG_END);
+    if(have_written_mem == true) {
+      INS_InsertCall(inst, IPOINT_BEFORE, (AFUNPTR)before_inst, IARG_INST_PTR, IARG_ADDRINT, read_reg_id[0], IARG_ADDRINT, read_reg_id[1], IARG_ADDRINT, read_reg_id[2], IARG_ADDRINT, read_reg_id[3], IARG_ADDRINT, read_reg_id[4], IARG_ADDRINT, read_reg_id[5], IARG_ADDRINT, written_reg_id[0], IARG_ADDRINT, written_reg_id[1], IARG_ADDRINT, written_reg_id[2], IARG_ADDRINT, written_reg_id[3], IARG_ADDRINT, written_reg_id[4], IARG_ADDRINT, written_reg_id[5], IARG_BOOL, have_read_mem_1, IARG_ADDRINT, 0, IARG_BOOL, have_read_mem_2, IARG_ADDRINT, 0, IARG_BOOL, have_written_mem, IARG_MEMORYWRITE_EA, IARG_CONTEXT, IARG_END);
     }
     else {
-      INS_InsertCall(inst, IPOINT_BEFORE, (AFUNPTR)before_inst, IARG_INST_PTR, IARG_ADDRINT, read_reg_id[0], IARG_ADDRINT, read_reg_id[1], IARG_ADDRINT, read_reg_id[2], IARG_ADDRINT, read_reg_id[3], IARG_ADDRINT, read_reg_id[4], IARG_ADDRINT, read_reg_id[5], IARG_ADDRINT, written_reg_id[0], IARG_ADDRINT, written_reg_id[1], IARG_ADDRINT, written_reg_id[2], IARG_ADDRINT, written_reg_id[3], IARG_ADDRINT, written_reg_id[4], IARG_ADDRINT, written_reg_id[5], IARG_ADDRINT, 0, IARG_ADDRINT, 0, IARG_ADDRINT, 0, IARG_CONTEXT, IARG_END);
+      INS_InsertCall(inst, IPOINT_BEFORE, (AFUNPTR)before_inst, IARG_INST_PTR, IARG_ADDRINT, read_reg_id[0], IARG_ADDRINT, read_reg_id[1], IARG_ADDRINT, read_reg_id[2], IARG_ADDRINT, read_reg_id[3], IARG_ADDRINT, read_reg_id[4], IARG_ADDRINT, read_reg_id[5], IARG_ADDRINT, written_reg_id[0], IARG_ADDRINT, written_reg_id[1], IARG_ADDRINT, written_reg_id[2], IARG_ADDRINT, written_reg_id[3], IARG_ADDRINT, written_reg_id[4], IARG_ADDRINT, written_reg_id[5], IARG_BOOL, have_read_mem_1, IARG_ADDRINT, 0, IARG_BOOL, have_read_mem_2, IARG_ADDRINT, 0, IARG_BOOL, have_written_mem, IARG_ADDRINT, 0, IARG_CONTEXT, IARG_END);
     }
   }
 }
