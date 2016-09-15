@@ -3,12 +3,12 @@
 #include <bitset>
 #include <set>
 #include <vector>
+#include <memory>
 #include <assert.h>
-#include <fcntl.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <sys/types.h>
-#include <memory>
+#include <sys/stat.h>
 #include <fcntl.h>
 
 using namespace std;
@@ -28,7 +28,7 @@ typedef struct access_info_t {
   vector<REG> written_reg_set;
 } access_info_t;
 
-set<uint64_t> taint_mem_set;
+int taint_mem_fd;
 
 vector<bool> taint_reg_set(REG_LAST, false);
 
@@ -55,12 +55,14 @@ void syscall_entry(THREADID tid, CONTEXT* ctxt, SYSCALL_STANDARD std, VOID* v) {
   if(PIN_GetSyscallArgument(ctxt, std, 0) == 0) {
     ADDRINT mem_addr = PIN_GetSyscallArgument(ctxt, std, 1);
     ADDRINT mem_size = PIN_GetSyscallArgument(ctxt, std, 2);
+    
+    lseek(taint_mem_fd, mem_addr, SEEK_SET);
+    char flag = 1;    
     for(ADDRINT i = 0; i < mem_size; ++i) {
-      taint_mem_set.insert(mem_addr+i);
+      write(taint_mem_fd, &flag, 1);
     }
   }
 }
-
 
 
 VOID inst_instrument(INS inst, VOID *v) {
@@ -68,16 +70,13 @@ VOID inst_instrument(INS inst, VOID *v) {
   
   auto_ptr<access_info_t> access_info(new access_info_t);
   
-  cout << "regR" << endl;
   uint32_t regR_num = INS_MaxNumRRegs(inst);
   for(uint32_t i = 0; i < regR_num ; ++i) {
-    cout << "\t" << REG_StringShort(INS_RegR(inst, i)) << endl;
     access_info->read_reg_set.push_back(INS_RegR(inst, i));
   }
-  cout << "regW" << endl;
+
   uint32_t regW_num = INS_MaxNumWRegs(inst);
   for(uint32_t i = 0; i < regW_num ; ++i) {
-    cout << "\t" << REG_StringShort(INS_RegW(inst, i)) << endl;
     access_info->written_reg_set.push_back(INS_RegW(inst, i));
   }
   
@@ -89,16 +88,23 @@ VOID inst_instrument(INS inst, VOID *v) {
       REG indexReg = INS_OperandMemoryIndexReg(inst, i);
       uint32_t scale = INS_OperandMemoryScale(inst, i);
       uint32_t disp = INS_OperandMemoryDisplacement(inst, i);
-      if()
+      if(INS_OperandRead(i)) {
+        access_info->read_mem_set.push_back({segmentReg, baseReg, indexReg, scale, disp});
+      }
+      if(INS_OperandWritten(i)) {
+        access_info->written_mem_set.push_back({segmentReg, baseReg, indexReg, scale, disp});
+      }
     }
   }
   
-  // insertCall(inst, IPOINT_BEFORE, before_inst, );
+//  insertCall(inst, IPOINT_BEFORE, before_inst, IARG_PTR, access_info);
 }
 
 int main(int argc, char *argv[]) {
   // init_ignore_syscall_set();
   init_sensitive_syscall_set();
+
+  system("fallocate -n -l 8G taint_mem_file");
 
   PIN_InitSymbols();
   if( PIN_Init(argc,argv) )
