@@ -15,41 +15,75 @@
 
 using namespace std;
 
-int taint_mem_fd;
-
 // #include "syscall_num.inc"
 #include "syscall_num_sensitive.inc"
 #include "reg_to_full.inc"
 
+map<ADDRINT, ADDRINT> taint_mem_set;
 map<REG, vector<bool> > taint_reg_set;
 
 void init_taint_mem() {
-  system("fallocate -n -l 8G /mnt/sdb/pin-3.0-76991-gcc-linux/source/tools/analysis-with-taint/taint_mem_file");
-  taint_mem_fd = open("/mnt/sdb/pin-3.0-76991-gcc-linux/source/tools/analysis-with-taint/taint_mem_file", O_RDWR);
-  assert(taint_mem_fd != -1);
+  taint_mem_set.insert(make_pair(0 ,0));
 }
 
 void set_taint_mem(ADDRINT mem_addr, ADDRINT mem_size, bool flag) {
-  cout << "\tset taint mem: " << mem_addr << " + " << mem_size << " - " << flag << endl;      
-  lseek(taint_mem_fd, mem_addr, SEEK_SET);
-  for(ADDRINT i = 0; i < mem_size; ++i) {
-    write(taint_mem_fd, &flag, 1);
+  cout << "\tset taint mem: " << mem_addr << " + " << mem_size << " - " << flag << endl;
+  map<ADDRINT, ADDRINT>::iterator iter = taint_mem_set.begin();
+  map<ADDRINT, ADDRINT>::iterator pre_iter = taint_mem_set.begin();
+  for(; iter != taint_mem_set.end(); ++iter) {
+    if(iter->first > mem_addr) {
+      break;
+    }
+    pre_iter = iter;
+  }
+  if(flag) {
+    if(iter == taint_mem_set.end() || iter->first > mem_addr + mem_size) {
+      if(pre_iter->second < mem_addr) {
+        taint_mem_set.insert(make_pair(mem_addr, mem_addr + mem_size));        
+      }
+      else {
+        pre_iter->second = mem_addr + mem_size;
+      }
+    }
+    else {
+      if(pre_iter->second < mem_addr) {
+        ADDRINT mem_end = iter->second;
+        taint_mem_set.erase(iter);
+        taint_mem_set.insert(make_pair(mem_addr, mem_end));
+      }
+      else {
+        ADDRINT mem_end = iter->second;
+        taint_mem_set.erase(iter);
+        pre_iter->second = mem_end;
+      }
+    }
+  }
+  else {
+    if(pre_iter->second > mem_addr) {
+      pre_iter->second = mem_addr;
+    }
+    if(iter != taint_mem_set.end() && iter->first < mem_addr + mem_size) {
+      ADDRINT mem_end = iter->second;
+      taint_mem_set.erase(iter);
+      taint_mem_set.insert(make_pair(mem_addr + mem_size, mem_end));
+    }
   }
 }
 
-void set_taint_mem(ADDRINT mem_addr, bool flag) {
-  lseek(taint_mem_fd, mem_addr, SEEK_SET);
-  write(taint_mem_fd, &flag, 1);
-}
-
 bool get_taint_mem(ADDRINT mem_addr, ADDRINT mem_size) {
-  bool flag;
-  lseek(taint_mem_fd, mem_addr, SEEK_SET);
-  for(ADDRINT i = 0; i < mem_size; ++i) {
-    read(taint_mem_fd, &flag, 1);
-    if(flag) {
-      return true;
+  map<ADDRINT, ADDRINT>::iterator iter = taint_mem_set.begin();
+  map<ADDRINT, ADDRINT>::iterator pre_iter = taint_mem_set.begin();
+  for(; iter != taint_mem_set.end(); ++iter) {
+    if(iter->first > mem_addr) {
+      break;
     }
+    pre_iter = iter;
+  }
+  if(pre_iter->second > mem_addr) {
+    return true;
+  }
+  if(iter != taint_mem_set.end() && iter->first < mem_addr + mem_size) {
+    return true;
   }
   return false;
 }
