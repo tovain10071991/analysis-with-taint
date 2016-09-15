@@ -13,21 +13,6 @@
 
 using namespace std;
 
-typedef struct mem_info_t {
-  REG segmentReg;
-  REG baseReg;
-  REG indexReg;
-  uint32_t scale;
-  uint32_t disp;
-} mem_info_t;
-
-typedef struct access_info_t {
-  vector<mem_info_t> read_mem_set;
-  vector<mem_info_t> written_mem_set;
-  vector<REG> read_reg_set;
-  vector<REG> written_reg_set;
-} access_info_t;
-
 int taint_mem_fd;
 
 vector<bool> taint_reg_set(REG_LAST, false);
@@ -64,40 +49,37 @@ void syscall_entry(THREADID tid, CONTEXT* ctxt, SYSCALL_STANDARD std, VOID* v) {
   }
 }
 
+VOID before_inst_with_read_reg(REG reg, ADDRINT reg_val) {
+  cout << "\tread reg: " << REG_StringShort(reg) << " - 0x" << hex << reg_val << endl;
+}
 
 VOID inst_instrument(INS inst, VOID *v) {
   cout << "0x" << hex << INS_Address(inst) << ": " << INS_Disassemble(inst) << endl;
-  
-  auto_ptr<access_info_t> access_info(new access_info_t);
-  
+    
   uint32_t regR_num = INS_MaxNumRRegs(inst);
   for(uint32_t i = 0; i < regR_num ; ++i) {
-    access_info->read_reg_set.push_back(INS_RegR(inst, i));
+    // cout << "\tread reg: " << REG_StringShort(INS_OperandReg(inst, i)) << endl;
+    // if(REG_valid(INS_OperandReg(inst, i))) {
+      // INS_InsertCall(inst, IPOINT_BEFORE, (AFUNPTR)before_inst_with_read_reg, IARG_REG_REFERENCE, IARG_REG_VALUE, INS_OperandReg(inst, i), IARG_END);
+    // }
   }
 
   uint32_t regW_num = INS_MaxNumWRegs(inst);
   for(uint32_t i = 0; i < regW_num ; ++i) {
-    access_info->written_reg_set.push_back(INS_RegW(inst, i));
+    // insertCall(inst, IPOINT_BEFORE, before_inst_with_written_reg, IARG_PTR, IARG_REG_REFERENCE);
   }
   
   uint32_t opr_count = INS_OperandCount(inst);
   for(uint32_t i = 0; i < opr_count; ++i) {
     if(INS_OperandIsMemory(inst, i)) {
-      REG segmentReg = INS_OperandMemorySegmentReg(inst, i);
-      REG baseReg = INS_OperandMemoryBaseReg(inst, i);
-      REG indexReg = INS_OperandMemoryIndexReg(inst, i);
-      uint32_t scale = INS_OperandMemoryScale(inst, i);
-      uint32_t disp = INS_OperandMemoryDisplacement(inst, i);
-      if(INS_OperandRead(i)) {
-        access_info->read_mem_set.push_back({segmentReg, baseReg, indexReg, scale, disp});
+      if(INS_OperandRead(inst, i)) {
+        // insertCall(inst, IPOINT_BEFORE, before_inst_with_read_mem, IARG_PTR, IARG_MEMORYREAD_EA);
       }
-      if(INS_OperandWritten(i)) {
-        access_info->written_mem_set.push_back({segmentReg, baseReg, indexReg, scale, disp});
+      if(INS_OperandWritten(inst, i)) {
+        // insertCall(inst, IPOINT_BEFORE, before_inst_with_written_mem, IARG_PTR, IARG_MEMORYREAD_EA);
       }
     }
   }
-  
-//  insertCall(inst, IPOINT_BEFORE, before_inst, IARG_PTR, access_info);
 }
 
 int main(int argc, char *argv[]) {
