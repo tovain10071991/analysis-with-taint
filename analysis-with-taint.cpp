@@ -17,6 +17,38 @@ int taint_mem_fd;
 
 vector<bool> taint_reg_set(REG_LAST, false);
 
+inline void init_taint_mem() {
+  system("fallocate -n -l 8G taint_mem_file");  
+}
+
+inline void set_taint_mem(ADDRINT mem_addr, ADDRINT mem_size) {
+  lseek(taint_mem_fd, mem_addr, SEEK_SET);
+  char flag = 1;
+  for(ADDRINT i = 0; i < mem_size; ++i) {
+    write(taint_mem_fd, &flag, 1);
+  }
+}
+
+inline void reset_taint_mem(ADDRINT mem_addr, ADDRINT mem_size) {
+  lseek(taint_mem_fd, mem_addr, SEEK_SET);
+  char flag = 0;
+  for(ADDRINT i = 0; i < mem_size; ++i) {
+    write(taint_mem_fd, &flag, 1);
+  }
+}
+
+inline void set_taint_reg(REG reg) {
+  taint_reg_set[reg] = true;
+}
+
+inline void reset_taint_reg(REG reg) {
+  taint_reg_set[reg] = false;
+}
+
+inline void propagate_taint(REG src_reg, REG des_reg) {
+  assert(REG_Size(src_reg) == REG_Size(des_reg));
+}
+
 KNOB<uint64_t> StartAddr(KNOB_MODE_WRITEONCE, "pintool", "s", "0", "start address");
 KNOB<uint64_t> EndAddr(KNOB_MODE_WRITEONCE, "pintool", "e", "0", "end address");
 
@@ -41,12 +73,12 @@ void syscall_entry(THREADID tid, CONTEXT* ctxt, SYSCALL_STANDARD std, VOID* v) {
     ADDRINT mem_addr = PIN_GetSyscallArgument(ctxt, std, 1);
     ADDRINT mem_size = PIN_GetSyscallArgument(ctxt, std, 2);
     
-    lseek(taint_mem_fd, mem_addr, SEEK_SET);
-    char flag = 1;    
-    for(ADDRINT i = 0; i < mem_size; ++i) {
-      write(taint_mem_fd, &flag, 1);
-    }
+    set_taint_mem(mem_addr, mem_size);
   }
+}
+
+VOID before_inst(ADDRINT inst_addr, ADDRINT read_reg_id_1, ADDRINT read_reg_id_2, ADDRINT read_reg_id_3, ADDRINT read_reg_id_4, ADDRINT read_reg_id_5, ADDRINT read_reg_id_6, ADDRINT written_reg_id_1, ADDRINT written_reg_id_2, ADDRINT written_reg_id_3, ADDRINT written_reg_id_4, ADDRINT written_reg_id_5, ADDRINT written_reg_id_6, ADDRINT read_mem_addr_1, ADDRINT read_mem_addr_2, ADDRINT written_mem_addr, CONTEXT* ctxt) {
+  
 }
 
 VOID before_inst_with_read_reg(ADDRINT inst_addr, ADDRINT reg_id, CONTEXT* ctxt) {
@@ -87,11 +119,17 @@ VOID before_inst_with_written_mem(ADDRINT inst_addr, ADDRINT mem_addr) {
 
 VOID inst_instrument(INS inst, VOID *v) {
   cout << "0x" << hex << INS_Address(inst) << ": " << INS_Disassemble(inst) << endl;
+  
+  ADDRINT read_reg_id[6] = {0};
+  ADDRINT written_reg_id[6] = {0};
     
   uint32_t regR_num = INS_MaxNumRRegs(inst);
+  assert(regR_num <= 6);
   for(uint32_t i = 0; i < regR_num ; ++i) {
     // cout << "\tread reg: " << REG_StringShort(INS_RegR(inst, i)) << endl;
     if(REG_valid(INS_RegR(inst, i))) {
+      read_reg_id[i] = INS_RegR(inst, i);
+      read_reg_id[i] = read_reg_id[i];
       INS_InsertCall(inst, IPOINT_BEFORE, (AFUNPTR)before_inst_with_read_reg, IARG_INST_PTR, IARG_ADDRINT, INS_RegR(inst, i), IARG_CONTEXT, IARG_END);
     }
   }
@@ -104,20 +142,25 @@ VOID inst_instrument(INS inst, VOID *v) {
   }
 
   uint32_t regW_num = INS_MaxNumWRegs(inst);
+  assert(regW_num <= 6);
   for(uint32_t i = 0; i < regW_num ; ++i) {
+    written_reg_id[i] = INS_RegW(inst, i);
+    written_reg_id[i] = written_reg_id[i];
     INS_InsertCall(inst, IPOINT_BEFORE, (AFUNPTR)before_inst_with_written_reg, IARG_INST_PTR, IARG_ADDRINT, INS_RegW(inst, i), IARG_CONTEXT, IARG_END);
   }
   
   if(INS_IsMemoryWrite(inst)) {
     INS_InsertCall(inst, IPOINT_BEFORE, (AFUNPTR)before_inst_with_written_mem, IARG_INST_PTR, IARG_MEMORYWRITE_EA, IARG_END);
   }
+  
+  INS_InsertCall(inst, IPOINT_BEFORE, (AFUNPTR)before_inst, IARG_INST_PTR, IARG_ADDRINT, read_reg_id[0], IARG_ADDRINT, read_reg_id[1], IARG_ADDRINT, read_reg_id[2], IARG_ADDRINT, read_reg_id[3], IARG_ADDRINT, read_reg_id[4], IARG_ADDRINT, read_reg_id[5], IARG_ADDRINT, written_reg_id[0], IARG_ADDRINT, written_reg_id[1], IARG_ADDRINT, written_reg_id[2], IARG_ADDRINT, written_reg_id[3], IARG_ADDRINT, written_reg_id[4], IARG_ADDRINT, written_reg_id[5], IARG_ADDRINT, 0, IARG_ADDRINT, 0, IARG_ADDRINT, 0, IARG_CONTEXT, IARG_END);
 }
 
 int main(int argc, char *argv[]) {
   // init_ignore_syscall_set();
   init_sensitive_syscall_set();
 
-  system("fallocate -n -l 8G taint_mem_file");
+  init_taint_mem();
 
   PIN_InitSymbols();
   if( PIN_Init(argc,argv) )
