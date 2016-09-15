@@ -144,22 +144,6 @@ void propagate_taint(vector<REG> src_reg_set, vector<REG> des_reg_set, vector<pa
   }
 }
 
-void propagate_taint(REG src_reg, REG des_reg) {
-  set_taint_reg(des_reg, get_taint_reg(src_reg));
-}
-
-void propagate_taint(REG src_reg, ADDRINT des_mem, uint32_t des_size) {
-  set_taint_mem(des_mem, des_size, get_taint_reg(src_reg));
-}
-
-void propagate_taint(ADDRINT src_mem,uint32_t src_size, REG des_reg) {
-  set_taint_reg(des_reg, get_taint_mem(src_mem, src_size));
-}
-
-void propagate_taint(ADDRINT src_mem, uint32_t src_size, ADDRINT des_mem, uint32_t des_size) {
-  set_taint_mem(des_mem, des_size, get_taint_mem(src_mem, src_size));
-}
-
 KNOB<uint64_t> StartAddr(KNOB_MODE_WRITEONCE, "pintool", "s", "0", "start address");
 KNOB<uint64_t> EndAddr(KNOB_MODE_WRITEONCE, "pintool", "e", "0", "end address");
 
