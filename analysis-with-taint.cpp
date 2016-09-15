@@ -228,6 +228,11 @@ VOID before_inst(ADDRINT inst_addr, ADDRINT read_reg_id_1, ADDRINT read_reg_id_2
   }
   
   propagate_taint(read_reg_set, written_reg_set, read_mem_set, written_mem_set);
+  
+  if(get_taint_reg(REG_RIP)) {
+    cout << "maybe meet bug" << endl;
+    exit(-1);
+  }
 }
 
 VOID inst_instrument(INS inst, VOID *v) {
