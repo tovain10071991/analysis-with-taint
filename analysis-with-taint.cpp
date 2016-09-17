@@ -1,4 +1,7 @@
 #include "pin.H"
+extern "C" {
+#include "../../../extras/xed-intel64/include/xed-interface.h"
+}
 #include <iostream>
 #include <bitset>
 #include <set>
@@ -27,7 +30,9 @@ void init_taint_mem() {
 }
 
 void set_taint_mem(ADDRINT mem_addr, ADDRINT mem_size, bool flag) {
+#ifdef DEBUG
   cout << "\tset taint mem: " << mem_addr << " + " << mem_size << " - " << flag << endl;
+#endif
   map<ADDRINT, ADDRINT>::iterator iter = taint_mem_set.begin();
   map<ADDRINT, ADDRINT>::iterator pre_iter = taint_mem_set.begin();
   for(; iter != taint_mem_set.end(); ++iter) {
@@ -89,7 +94,9 @@ bool get_taint_mem(ADDRINT mem_addr, ADDRINT mem_size) {
 }
 
 void set_taint_reg(REG reg, bool flag) {
+#ifdef DEBUG
   cout << "\tset taint reg: " << REG_StringShort(reg) << " - " << flag << endl;  
+#endif
   REG full_reg = REG_FullRegName(reg);
   uint32_t off = 0;
   if(reg_to_full.find(reg) != reg_to_full.end()) {
@@ -97,6 +104,9 @@ void set_taint_reg(REG reg, bool flag) {
   }
   if(taint_reg_set.find(full_reg) == taint_reg_set.end()) {
     taint_reg_set[full_reg] = vector<bool>(REG_Size(full_reg), false);
+  }
+  if(full_reg == REG_EFLAGS) {
+    return;
   }
   for(uint32_t i = 0; i < REG_Size(reg); ++i) {
     taint_reg_set[full_reg][off + i] = flag;
@@ -157,7 +167,7 @@ INT32 Usage() {
 
 void syscall_entry(THREADID tid, CONTEXT* ctxt, SYSCALL_STANDARD std, VOID* v) {
   ADDRINT syscall_num = PIN_GetSyscallNumber(ctxt, std);
-  cout << "===syscall entry===" << endl << "syscall num: " << syscall_num << endl;
+  // cout << "===syscall entry===" << endl << "syscall num: " << syscall_num << endl;
   // if(ignore_syscall_set.find(syscall_num) != ignore_syscall_set.end())
   if(sensitive_syscall_set.find(syscall_num) == sensitive_syscall_set.end())
     return;
@@ -169,12 +179,26 @@ void syscall_entry(THREADID tid, CONTEXT* ctxt, SYSCALL_STANDARD std, VOID* v) {
   }
 }
 
-VOID before_inst(ADDRINT inst_addr, ADDRINT read_reg_id_1, ADDRINT read_reg_id_2, ADDRINT read_reg_id_3, ADDRINT read_reg_id_4, ADDRINT read_reg_id_5, ADDRINT read_reg_id_6, ADDRINT written_reg_id_1, ADDRINT written_reg_id_2, ADDRINT written_reg_id_3, ADDRINT written_reg_id_4, ADDRINT written_reg_id_5, ADDRINT written_reg_id_6, BOOL have_read_mem_1, ADDRINT read_mem_addr_1, UINT32 read_mem_size_1, BOOL have_read_mem_2, ADDRINT read_mem_addr_2, UINT32 read_mem_size_2, BOOL have_written_mem, ADDRINT written_mem_addr, UINT32 written_mem_size, CONTEXT* ctxt) {
+bool analysis_sematic(xed_iclass_enum_t opcode, vector<REG> read_reg_set, vector<REG> written_reg_set, vector<pair<ADDRINT, UINT32> > read_mem_set, vector<pair<ADDRINT, UINT32> > written_mem_set) {
+  if(opcode == XED_ICLASS_PXOR || opcode == XED_ICLASS_VPXOR || opcode == XED_ICLASS_VPXORD || opcode == XED_ICLASS_VPXORQ || opcode == XED_ICLASS_VXORPD || opcode == XED_ICLASS_VXORPS || opcode == XED_ICLASS_XOR || opcode == XED_ICLASS_XORPD || opcode == XED_ICLASS_XORPS || opcode == XED_ICLASS_XOR_LOCK)
+  {
+    assert(read_reg_set.size() == 2);
+    if(read_reg_set[0] == read_reg_set[1]) {
+      for(vector<REG>::iterator iter = written_reg_set.begin(); iter != written_reg_set.end(); ++iter) {
+        set_taint_reg(*iter, false);        
+      }
+      return true;
+    }
+  }
+  return false;
+}
+
+VOID before_inst(ADDRINT inst_addr, UINT64 opcode, ADDRINT read_reg_id_1, ADDRINT read_reg_id_2, ADDRINT read_reg_id_3, ADDRINT read_reg_id_4, ADDRINT read_reg_id_5, ADDRINT read_reg_id_6, ADDRINT written_reg_id_1, ADDRINT written_reg_id_2, ADDRINT written_reg_id_3, ADDRINT written_reg_id_4, ADDRINT written_reg_id_5, ADDRINT written_reg_id_6, BOOL have_read_mem_1, ADDRINT read_mem_addr_1, UINT32 read_mem_size_1, BOOL have_read_mem_2, ADDRINT read_mem_addr_2, UINT32 read_mem_size_2, BOOL have_written_mem, ADDRINT written_mem_addr, UINT32 written_mem_size, CONTEXT* ctxt) {
   REG read_reg[6] = {(REG)read_reg_id_1, (REG)read_reg_id_2, (REG)read_reg_id_3, (REG)read_reg_id_4, (REG)read_reg_id_5, (REG)read_reg_id_6};
   REG written_reg[6] = {(REG)written_reg_id_1, (REG)written_reg_id_2, (REG)written_reg_id_3, (REG)written_reg_id_4, (REG)written_reg_id_5, (REG)written_reg_id_6};
-  
-  cout << "0x" << hex << inst_addr << endl;
-  
+#ifdef DEBUG  
+  cout << "0x" << hex << inst_addr << ": " << xed_iclass_enum_t2str((xed_iclass_enum_t)opcode) << endl;
+#endif
   vector<REG> read_reg_set, written_reg_set;
   vector<pair<ADDRINT, UINT32> > read_mem_set, written_mem_set;
   
@@ -182,6 +206,7 @@ VOID before_inst(ADDRINT inst_addr, ADDRINT read_reg_id_1, ADDRINT read_reg_id_2
     if(!REG_valid(read_reg[i])) {
       continue;
     }
+#ifdef DEBUG
     cout << "\tread reg: " << REG_StringShort(read_reg[i]) << endl;
     cout << "\t\t";
     UINT8 val_buf[512];
@@ -192,7 +217,7 @@ VOID before_inst(ADDRINT inst_addr, ADDRINT read_reg_id_1, ADDRINT read_reg_id_2
       cout << " " << int(val_buf[i]);
     }
     cout << endl;
-    
+#endif
     read_reg_set.push_back(read_reg[i]);
   }
   
@@ -200,6 +225,7 @@ VOID before_inst(ADDRINT inst_addr, ADDRINT read_reg_id_1, ADDRINT read_reg_id_2
     if(!REG_valid(written_reg[i])) {
       continue;
     }
+#ifdef DEBUG
     cout << "\twritten reg: " << REG_StringShort(written_reg[i]) << endl;
     cout << "\t\t";
     UINT8 val_buf[512];
@@ -210,34 +236,44 @@ VOID before_inst(ADDRINT inst_addr, ADDRINT read_reg_id_1, ADDRINT read_reg_id_2
       cout << " " << int(val_buf[i]);
     }
     cout << endl;
-    
+#endif
     written_reg_set.push_back(written_reg[i]);
   }
   
   if(have_read_mem_1) {
+#ifdef DEBUG
     cout << "\tread mem: " << hex << read_mem_addr_1 << endl;
+#endif
     read_mem_set.push_back(make_pair(read_mem_addr_1, read_mem_size_1));
   }
   if(have_read_mem_2) {
+#ifdef DEBUG
     cout << "\tread mem: " << hex << read_mem_addr_2 << endl;
+#endif
     read_mem_set.push_back(make_pair(read_mem_addr_2, read_mem_size_2));    
   }
   if(have_written_mem) {
+#ifdef DEBUG
     cout << "\twritten mem: " << hex << written_mem_addr << endl;
+#endif
     written_mem_set.push_back(make_pair(written_mem_addr, written_mem_size));
   }
   
-  propagate_taint(read_reg_set, written_reg_set, read_mem_set, written_mem_set);
+  if(!analysis_sematic((xed_iclass_enum_t)opcode, read_reg_set, written_reg_set, read_mem_set, written_mem_set)) {
+    propagate_taint(read_reg_set, written_reg_set, read_mem_set, written_mem_set);    
+  }  
   
   if(get_taint_reg(REG_RIP)) {
-    cout << "maybe meet bug" << endl;
+    cout << "maybe meet bug: 0x" << hex << inst_addr << endl;
+    cerr << "maybe meet bug: 0x" << hex << inst_addr << endl;
     exit(-1);
   }
 }
 
 VOID inst_instrument(INS inst, VOID *v) {
+#ifdef DEBUG
   cout << "0x" << hex << INS_Address(inst) << ": " << INS_Disassemble(inst) << endl;
-  
+#endif
   ADDRINT read_reg_id[6] = {0};
   ADDRINT written_reg_id[6] = {0};
 
@@ -250,11 +286,11 @@ VOID inst_instrument(INS inst, VOID *v) {
   }
 
   if(INS_IsMemoryRead(inst)) {
-    cout << "have read mem 1" << endl;
+    // cout << "have read mem 1" << endl;
     have_read_mem_1 = true;
   }
   if(INS_HasMemoryRead2(inst)) {
-    cout << "have read mem 2" << endl;
+    // cout << "have read mem 2" << endl;
     have_read_mem_2 = true;
   }
 
@@ -265,34 +301,34 @@ VOID inst_instrument(INS inst, VOID *v) {
   }
   
   if(INS_IsMemoryWrite(inst)) {
-    cout << "have written mem" << endl;
+    // cout << "have written mem" << endl;
     have_written_mem = true;
   }
   
   if(have_read_mem_1 == true) {
     if(have_read_mem_2 == true) {
       if(have_written_mem == true) {
-        INS_InsertCall(inst, IPOINT_BEFORE, (AFUNPTR)before_inst, IARG_INST_PTR, IARG_ADDRINT, read_reg_id[0], IARG_ADDRINT, read_reg_id[1], IARG_ADDRINT, read_reg_id[2], IARG_ADDRINT, read_reg_id[3], IARG_ADDRINT, read_reg_id[4], IARG_ADDRINT, read_reg_id[5], IARG_ADDRINT, written_reg_id[0], IARG_ADDRINT, written_reg_id[1], IARG_ADDRINT, written_reg_id[2], IARG_ADDRINT, written_reg_id[3], IARG_ADDRINT, written_reg_id[4], IARG_ADDRINT, written_reg_id[5], IARG_BOOL, have_read_mem_1, IARG_MEMORYREAD_EA, IARG_MEMORYREAD_SIZE, IARG_BOOL, have_read_mem_2, IARG_MEMORYREAD2_EA, IARG_MEMORYREAD_SIZE, IARG_BOOL, have_written_mem, IARG_MEMORYWRITE_EA, IARG_MEMORYWRITE_EA, IARG_CONTEXT, IARG_END);
+        INS_InsertCall(inst, IPOINT_BEFORE, (AFUNPTR)before_inst, IARG_INST_PTR, IARG_UINT64, INS_Opcode(inst), IARG_ADDRINT, read_reg_id[0], IARG_ADDRINT, read_reg_id[1], IARG_ADDRINT, read_reg_id[2], IARG_ADDRINT, read_reg_id[3], IARG_ADDRINT, read_reg_id[4], IARG_ADDRINT, read_reg_id[5], IARG_ADDRINT, written_reg_id[0], IARG_ADDRINT, written_reg_id[1], IARG_ADDRINT, written_reg_id[2], IARG_ADDRINT, written_reg_id[3], IARG_ADDRINT, written_reg_id[4], IARG_ADDRINT, written_reg_id[5], IARG_BOOL, have_read_mem_1, IARG_MEMORYREAD_EA, IARG_MEMORYREAD_SIZE, IARG_BOOL, have_read_mem_2, IARG_MEMORYREAD2_EA, IARG_MEMORYREAD_SIZE, IARG_BOOL, have_written_mem, IARG_MEMORYWRITE_EA, IARG_MEMORYWRITE_EA, IARG_CONTEXT, IARG_END);
       }
       else {
-        INS_InsertCall(inst, IPOINT_BEFORE, (AFUNPTR)before_inst, IARG_INST_PTR, IARG_ADDRINT, read_reg_id[0], IARG_ADDRINT, read_reg_id[1], IARG_ADDRINT, read_reg_id[2], IARG_ADDRINT, read_reg_id[3], IARG_ADDRINT, read_reg_id[4], IARG_ADDRINT, read_reg_id[5], IARG_ADDRINT, written_reg_id[0], IARG_ADDRINT, written_reg_id[1], IARG_ADDRINT, written_reg_id[2], IARG_ADDRINT, written_reg_id[3], IARG_ADDRINT, written_reg_id[4], IARG_ADDRINT, written_reg_id[5], IARG_BOOL, have_read_mem_1, IARG_MEMORYREAD_EA, IARG_MEMORYREAD_SIZE, IARG_BOOL, have_read_mem_2, IARG_MEMORYREAD2_EA, IARG_MEMORYREAD_SIZE, IARG_BOOL, have_written_mem, IARG_ADDRINT, 0, IARG_UINT32, 0, IARG_CONTEXT, IARG_END);
+        INS_InsertCall(inst, IPOINT_BEFORE, (AFUNPTR)before_inst, IARG_INST_PTR, IARG_UINT64, INS_Opcode(inst), IARG_ADDRINT, read_reg_id[0], IARG_ADDRINT, read_reg_id[1], IARG_ADDRINT, read_reg_id[2], IARG_ADDRINT, read_reg_id[3], IARG_ADDRINT, read_reg_id[4], IARG_ADDRINT, read_reg_id[5], IARG_ADDRINT, written_reg_id[0], IARG_ADDRINT, written_reg_id[1], IARG_ADDRINT, written_reg_id[2], IARG_ADDRINT, written_reg_id[3], IARG_ADDRINT, written_reg_id[4], IARG_ADDRINT, written_reg_id[5], IARG_BOOL, have_read_mem_1, IARG_MEMORYREAD_EA, IARG_MEMORYREAD_SIZE, IARG_BOOL, have_read_mem_2, IARG_MEMORYREAD2_EA, IARG_MEMORYREAD_SIZE, IARG_BOOL, have_written_mem, IARG_ADDRINT, 0, IARG_UINT32, 0, IARG_CONTEXT, IARG_END);
       }
     }
     else {
       if(have_written_mem == true) {
-        INS_InsertCall(inst, IPOINT_BEFORE, (AFUNPTR)before_inst, IARG_INST_PTR, IARG_ADDRINT, read_reg_id[0], IARG_ADDRINT, read_reg_id[1], IARG_ADDRINT, read_reg_id[2], IARG_ADDRINT, read_reg_id[3], IARG_ADDRINT, read_reg_id[4], IARG_ADDRINT, read_reg_id[5], IARG_ADDRINT, written_reg_id[0], IARG_ADDRINT, written_reg_id[1], IARG_ADDRINT, written_reg_id[2], IARG_ADDRINT, written_reg_id[3], IARG_ADDRINT, written_reg_id[4], IARG_ADDRINT, written_reg_id[5], IARG_BOOL, have_read_mem_1, IARG_MEMORYREAD_EA, IARG_MEMORYREAD_SIZE, IARG_BOOL, have_read_mem_2, IARG_ADDRINT, 0, IARG_UINT32, 0, IARG_BOOL, have_written_mem, IARG_MEMORYWRITE_EA, IARG_MEMORYWRITE_SIZE, IARG_CONTEXT, IARG_END);
+        INS_InsertCall(inst, IPOINT_BEFORE, (AFUNPTR)before_inst, IARG_INST_PTR, IARG_UINT64, INS_Opcode(inst), IARG_ADDRINT, read_reg_id[0], IARG_ADDRINT, read_reg_id[1], IARG_ADDRINT, read_reg_id[2], IARG_ADDRINT, read_reg_id[3], IARG_ADDRINT, read_reg_id[4], IARG_ADDRINT, read_reg_id[5], IARG_ADDRINT, written_reg_id[0], IARG_ADDRINT, written_reg_id[1], IARG_ADDRINT, written_reg_id[2], IARG_ADDRINT, written_reg_id[3], IARG_ADDRINT, written_reg_id[4], IARG_ADDRINT, written_reg_id[5], IARG_BOOL, have_read_mem_1, IARG_MEMORYREAD_EA, IARG_MEMORYREAD_SIZE, IARG_BOOL, have_read_mem_2, IARG_ADDRINT, 0, IARG_UINT32, 0, IARG_BOOL, have_written_mem, IARG_MEMORYWRITE_EA, IARG_MEMORYWRITE_SIZE, IARG_CONTEXT, IARG_END);
       }
       else {
-        INS_InsertCall(inst, IPOINT_BEFORE, (AFUNPTR)before_inst, IARG_INST_PTR, IARG_ADDRINT, read_reg_id[0], IARG_ADDRINT, read_reg_id[1], IARG_ADDRINT, read_reg_id[2], IARG_ADDRINT, read_reg_id[3], IARG_ADDRINT, read_reg_id[4], IARG_ADDRINT, read_reg_id[5], IARG_ADDRINT, written_reg_id[0], IARG_ADDRINT, written_reg_id[1], IARG_ADDRINT, written_reg_id[2], IARG_ADDRINT, written_reg_id[3], IARG_ADDRINT, written_reg_id[4], IARG_ADDRINT, written_reg_id[5], IARG_BOOL, have_read_mem_1, IARG_MEMORYREAD_EA, IARG_MEMORYREAD_SIZE, IARG_BOOL, have_read_mem_2, IARG_ADDRINT, 0, IARG_UINT32, 0, IARG_BOOL, have_written_mem, IARG_ADDRINT, 0, IARG_UINT32, 0, IARG_CONTEXT, IARG_END);
+        INS_InsertCall(inst, IPOINT_BEFORE, (AFUNPTR)before_inst, IARG_INST_PTR, IARG_UINT64, INS_Opcode(inst), IARG_ADDRINT, read_reg_id[0], IARG_ADDRINT, read_reg_id[1], IARG_ADDRINT, read_reg_id[2], IARG_ADDRINT, read_reg_id[3], IARG_ADDRINT, read_reg_id[4], IARG_ADDRINT, read_reg_id[5], IARG_ADDRINT, written_reg_id[0], IARG_ADDRINT, written_reg_id[1], IARG_ADDRINT, written_reg_id[2], IARG_ADDRINT, written_reg_id[3], IARG_ADDRINT, written_reg_id[4], IARG_ADDRINT, written_reg_id[5], IARG_BOOL, have_read_mem_1, IARG_MEMORYREAD_EA, IARG_MEMORYREAD_SIZE, IARG_BOOL, have_read_mem_2, IARG_ADDRINT, 0, IARG_UINT32, 0, IARG_BOOL, have_written_mem, IARG_ADDRINT, 0, IARG_UINT32, 0, IARG_CONTEXT, IARG_END);
       }
     }
   }
   else {
     if(have_written_mem == true) {
-      INS_InsertCall(inst, IPOINT_BEFORE, (AFUNPTR)before_inst, IARG_INST_PTR, IARG_ADDRINT, read_reg_id[0], IARG_ADDRINT, read_reg_id[1], IARG_ADDRINT, read_reg_id[2], IARG_ADDRINT, read_reg_id[3], IARG_ADDRINT, read_reg_id[4], IARG_ADDRINT, read_reg_id[5], IARG_ADDRINT, written_reg_id[0], IARG_ADDRINT, written_reg_id[1], IARG_ADDRINT, written_reg_id[2], IARG_ADDRINT, written_reg_id[3], IARG_ADDRINT, written_reg_id[4], IARG_ADDRINT, written_reg_id[5], IARG_BOOL, have_read_mem_1, IARG_ADDRINT, 0, IARG_UINT32, 0, IARG_BOOL, have_read_mem_2, IARG_ADDRINT, 0, IARG_UINT32, 0, IARG_BOOL, have_written_mem, IARG_MEMORYWRITE_EA, IARG_MEMORYWRITE_SIZE, IARG_CONTEXT, IARG_END);
+      INS_InsertCall(inst, IPOINT_BEFORE, (AFUNPTR)before_inst, IARG_INST_PTR, IARG_UINT64, INS_Opcode(inst), IARG_ADDRINT, read_reg_id[0], IARG_ADDRINT, read_reg_id[1], IARG_ADDRINT, read_reg_id[2], IARG_ADDRINT, read_reg_id[3], IARG_ADDRINT, read_reg_id[4], IARG_ADDRINT, read_reg_id[5], IARG_ADDRINT, written_reg_id[0], IARG_ADDRINT, written_reg_id[1], IARG_ADDRINT, written_reg_id[2], IARG_ADDRINT, written_reg_id[3], IARG_ADDRINT, written_reg_id[4], IARG_ADDRINT, written_reg_id[5], IARG_BOOL, have_read_mem_1, IARG_ADDRINT, 0, IARG_UINT32, 0, IARG_BOOL, have_read_mem_2, IARG_ADDRINT, 0, IARG_UINT32, 0, IARG_BOOL, have_written_mem, IARG_MEMORYWRITE_EA, IARG_MEMORYWRITE_SIZE, IARG_CONTEXT, IARG_END);
     }
     else {
-      INS_InsertCall(inst, IPOINT_BEFORE, (AFUNPTR)before_inst, IARG_INST_PTR, IARG_ADDRINT, read_reg_id[0], IARG_ADDRINT, read_reg_id[1], IARG_ADDRINT, read_reg_id[2], IARG_ADDRINT, read_reg_id[3], IARG_ADDRINT, read_reg_id[4], IARG_ADDRINT, read_reg_id[5], IARG_ADDRINT, written_reg_id[0], IARG_ADDRINT, written_reg_id[1], IARG_ADDRINT, written_reg_id[2], IARG_ADDRINT, written_reg_id[3], IARG_ADDRINT, written_reg_id[4], IARG_ADDRINT, written_reg_id[5], IARG_BOOL, have_read_mem_1, IARG_ADDRINT, 0, IARG_UINT32, 0, IARG_BOOL, have_read_mem_2, IARG_ADDRINT, 0, IARG_UINT32, 0, IARG_BOOL, have_written_mem, IARG_ADDRINT, 0, IARG_UINT32, 0, IARG_CONTEXT, IARG_END);
+      INS_InsertCall(inst, IPOINT_BEFORE, (AFUNPTR)before_inst, IARG_INST_PTR, IARG_UINT64, INS_Opcode(inst), IARG_ADDRINT, read_reg_id[0], IARG_ADDRINT, read_reg_id[1], IARG_ADDRINT, read_reg_id[2], IARG_ADDRINT, read_reg_id[3], IARG_ADDRINT, read_reg_id[4], IARG_ADDRINT, read_reg_id[5], IARG_ADDRINT, written_reg_id[0], IARG_ADDRINT, written_reg_id[1], IARG_ADDRINT, written_reg_id[2], IARG_ADDRINT, written_reg_id[3], IARG_ADDRINT, written_reg_id[4], IARG_ADDRINT, written_reg_id[5], IARG_BOOL, have_read_mem_1, IARG_ADDRINT, 0, IARG_UINT32, 0, IARG_BOOL, have_read_mem_2, IARG_ADDRINT, 0, IARG_UINT32, 0, IARG_BOOL, have_written_mem, IARG_ADDRINT, 0, IARG_UINT32, 0, IARG_CONTEXT, IARG_END);
     }
   }
 }
