@@ -253,10 +253,10 @@ INT32 Usage() {
 
     return -1;
 }
-
+/*
 map<uint64_t, string> base_module_set;
 map<uint64_t, uint64_t> base_high_set;
-
+*/
 VOID load_image(IMG img, void* v) {
 #ifdef DEBUG
   cout << "====load image====" << endl;
@@ -267,8 +267,8 @@ VOID load_image(IMG img, void* v) {
   cout << "start address: " << IMG_StartAddress(img) << endl;
   cout << "size mapped: " << IMG_SizeMapped(img) << endl;
 #endif
-  base_module_set.insert(make_pair(IMG_LoadOffset(img), IMG_Name(img)));
-  base_high_set.insert(make_pair(IMG_LoadOffset(img), IMG_HighAddress(img)));
+  // base_module_set.insert(make_pair(IMG_LoadOffset(img), IMG_Name(img)));
+  // base_high_set.insert(make_pair(IMG_LoadOffset(img), IMG_HighAddress(img)));
 }
 
 void syscall_entry(THREADID tid, CONTEXT* ctxt, SYSCALL_STANDARD std, VOID* v) {
@@ -311,8 +311,10 @@ void analysis_sematic(xed_iclass_enum_t opcode, vector<REG> read_reg_set, vector
   }
 }
 
-void compute_hash(uint64_t inst_addr) {
-  map<uint64_t, string>::iterator iter = base_module_set.begin();
+list<pair<ADDRINT, ADDRINT> > dummy_control_set;
+
+void compute_hash(uint64_t inst_addr, uint64_t target_addr) {
+/*  map<uint64_t, string>::iterator iter = base_module_set.begin();
   for(; iter != base_module_set.end(); ++iter) {
     if(inst_addr >= iter->first && inst_addr <= base_high_set[iter->first])
       break;
@@ -324,16 +326,44 @@ void compute_hash(uint64_t inst_addr) {
   ss << hex << iter->first;
   ss >> base_str;
   module_base += base_str;
+*/
+
+  PIN_LockClient();
+  IMG img = IMG_FindByAddress(inst_addr);
+  PIN_UnlockClient();
+  assert(IMG_Valid(img));
+  string module_base = IMG_Name(img);
+  stringstream ss;
+  string base_str;
+  ss << hex << (inst_addr - IMG_LoadOffset(img));
+  ss >> base_str;
+  module_base += " - ";
+  module_base += base_str;
+  size_t len = module_base.size();
+#ifdef DEBUG
+  cout << hex << "str to be hashed("  << len << "): " << module_base << endl;
+#endif
 
   uint8_t cmd = COMPUTE_CMD;
   write(hash_req, &cmd, 1);
-  size_t len = module_base.size();
   write(hash_req, &len, sizeof(len));
   write(hash_req, module_base.c_str(), len);
+  write(hash_req, &target_addr, 8);
+}
 
-#ifdef DEBUG
-  cout << "str to be hashed: " << module_base << endl;
-#endif
+
+void flush_hash(uint64_t inst_addr, uint64_t target_addr) {
+  dummy_control_set.push_back(make_pair(inst_addr, target_addr));
+  while(!dummy_control_set.empty()) {
+    pair<ADDRINT, ADDRINT>& dummy_pair = dummy_control_set.front();
+    PIN_LockClient();
+    IMG img = IMG_FindByAddress(dummy_pair.first);
+    PIN_UnlockClient();
+    if(!IMG_Valid(img))
+      break;
+    compute_hash(dummy_pair.first, dummy_pair.second);
+    dummy_control_set.pop_front();
+  }
 }
 
 VOID before_inst(ADDRINT inst_addr, UINT64 opcode, ADDRINT read_reg_id_1, ADDRINT read_reg_id_2, ADDRINT read_reg_id_3, ADDRINT read_reg_id_4, ADDRINT read_reg_id_5, ADDRINT read_reg_id_6, ADDRINT written_reg_id_1, ADDRINT written_reg_id_2, ADDRINT written_reg_id_3, ADDRINT written_reg_id_4, ADDRINT written_reg_id_5, ADDRINT written_reg_id_6, BOOL have_read_mem_1, ADDRINT read_mem_addr_1, UINT32 read_mem_size_1, BOOL have_read_mem_2, ADDRINT read_mem_addr_2, UINT32 read_mem_size_2, BOOL have_written_mem, ADDRINT written_mem_addr, UINT32 written_mem_size, CONTEXT* ctxt, bool is_branch) {
@@ -418,7 +448,8 @@ VOID before_inst(ADDRINT inst_addr, UINT64 opcode, ADDRINT read_reg_id_1, ADDRIN
 #ifdef DEBUG
     cout << "it is branch" << endl;
 #endif
-    compute_hash(inst_addr);
+    ADDRINT target_addr = PIN_GetContextReg(ctxt, REG_RIP);
+    flush_hash(inst_addr, target_addr);
   }
 }
 
@@ -490,6 +521,15 @@ VOID inst_instrument(INS inst, VOID *v) {
   }
 }
 
+VOID fini(INT32 code, VOID* v) {
+  uint8_t cmd = TERMINATE_CMD;
+  write(hash_req, &cmd, 1);
+  close(hash_req);
+#ifdef DEBUG
+  cout << "done!" << endl;
+#endif
+}
+
 int main(int argc, char *argv[]) {
   // init_ignore_syscall_set();
   init_sensitive_syscall_set();
@@ -514,11 +554,10 @@ int main(int argc, char *argv[]) {
   }
   hash_req = open(HASH_FIFO, O_WRONLY);
 
+  PIN_AddFiniFunction(fini, NULL);
+
   PIN_StartProgram();
 
-  uint8_t cmd = TERMINATE_CMD;
-  write(hash_req, &cmd, 1);
-  close(hash_req);
   return 0;
 }
 
